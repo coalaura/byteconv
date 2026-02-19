@@ -7,41 +7,9 @@ package byteconv
 
 import "math"
 
-// optimize is set to false to force slow-path conversions for testing
 var optimize = true
 
-// commonPrefixLenIgnoreCase returns the length of the common
-// prefix of s and prefix, with the character case of s ignored.
-// The prefix argument must be all lower-case.
-func commonPrefixLenIgnoreCase(s, prefix []byte) int {
-	n := len(prefix)
-	if len(s) < n {
-		n = len(s)
-	}
-	for i := 0; i < n; i++ {
-		c := s[i]
-		if 'A' <= c && c <= 'Z' {
-			c += 'a' - 'A'
-		}
-		if c != prefix[i] {
-			return i
-		}
-	}
-	return n
-}
-
-func lower(c byte) byte {
-	if c >= 'A' && c <= 'Z' {
-		return c + ('a' - 'A')
-	}
-	return c
-}
-
-// special returns the floating-point value for the special,
-// possibly signed floating-point representations inf, infinity,
-// and NaN. The result is ok if a prefix of s contains one
-// of these representations and n is the length of that prefix.
-// The character case is ignored.
+// special returns the floating-point value for inf, infinity, and NaN.
 func special(s []byte) (f float64, n int, ok bool) {
 	if len(s) == 0 {
 		return 0, 0, false
@@ -55,19 +23,19 @@ func special(s []byte) (f float64, n int, ok bool) {
 		}
 		nsign = 1
 		s = s[1:]
-		fallthrough
-	case 'i', 'I':
-		n := commonPrefixLenIgnoreCase(s, []byte{'i', 'n', 'f', 'i', 'n', 'i', 't', 'y'})
-		// Anything longer than "inf" is ok, but if we
-		// don't have "infinity", only consume "inf".
-		if 3 < n && n < 8 {
-			n = 3
+		if len(s) == 0 {
+			return 0, 0, false
 		}
-		if n == 3 || n == 8 {
-			return math.Inf(sign), nsign + n, true
+		fallthrough // A signed value MUST be infinity, never NaN.
+	case 'i', 'I':
+		if len(s) >= 3 && (s[0]|0x20) == 'i' && (s[1]|0x20) == 'n' && (s[2]|0x20) == 'f' {
+			if len(s) >= 8 && (s[3]|0x20) == 'i' && (s[4]|0x20) == 'n' && (s[5]|0x20) == 'i' && (s[6]|0x20) == 't' && (s[7]|0x20) == 'y' {
+				return math.Inf(sign), nsign + 8, true
+			}
+			return math.Inf(sign), nsign + 3, true
 		}
 	case 'n', 'N':
-		if commonPrefixLenIgnoreCase(s, []byte{'n', 'a', 'n'}) == 3 {
+		if len(s) >= 3 && (s[0]|0x20) == 'n' && (s[1]|0x20) == 'a' && (s[2]|0x20) == 'n' {
 			return math.NaN(), 3, true
 		}
 	}
@@ -75,175 +43,199 @@ func special(s []byte) (f float64, n int, ok bool) {
 }
 
 func (b *decimal) set(s []byte) (ok bool) {
+	lenS := len(s)
+	if lenS == 0 {
+		return false
+	}
+	_ = s[lenS-1] // BCE Hint
+
 	i := 0
 	b.neg = false
 	b.trunc = false
 
-	// optional sign
-	if i >= len(s) {
-		return
-	}
-	switch s[i] {
-	case '+':
+	if s[i] == '+' {
 		i++
-	case '-':
+	} else if s[i] == '-' {
 		i++
 		b.neg = true
 	}
 
-	// digits
 	sawdot := false
 	sawdigits := false
-	for ; i < len(s); i++ {
-		switch {
-		case s[i] == '_':
-			continue
-		case s[i] == '.':
-			if sawdot {
-				return
-			}
-			sawdot = true
-			b.dp = b.nd
-			continue
 
-		case '0' <= s[i] && s[i] <= '9':
+	// Register-only math. No memory lookups for large floats.
+	for ; i < lenS; i++ {
+		c := s[i]
+		if c-'0' <= 9 {
 			sawdigits = true
-			if s[i] == '0' && b.nd == 0 { // ignore leading zeros
+			if c == '0' && b.nd == 0 {
 				b.dp--
 				continue
 			}
 			if b.nd < len(b.d) {
-				b.d[b.nd] = s[i]
+				b.d[b.nd] = c
 				b.nd++
-			} else if s[i] != '0' {
+			} else if c != '0' {
 				b.trunc = true
 			}
+		} else if c == '.' {
+			if sawdot {
+				return false
+			}
+			sawdot = true
+			b.dp = b.nd
+		} else if c == '_' {
 			continue
+		} else {
+			break
 		}
-		break
 	}
+
 	if !sawdigits {
-		return
+		return false
 	}
 	if !sawdot {
 		b.dp = b.nd
 	}
 
-	// optional exponent moves decimal point.
-	if i < len(s) && lower(s[i]) == 'e' {
+	if i < lenS && (s[i]|0x20) == 'e' {
 		i++
-		if i >= len(s) {
-			return
+		if i >= lenS {
+			return false
 		}
 		esign := 1
-		switch s[i] {
-		case '+':
+		if s[i] == '+' {
 			i++
-		case '-':
+		} else if s[i] == '-' {
 			i++
 			esign = -1
 		}
-		if i >= len(s) || s[i] < '0' || s[i] > '9' {
-			return
+		if i >= lenS || s[i]-'0' > 9 {
+			return false
 		}
 		e := 0
-		for ; i < len(s) && ('0' <= s[i] && s[i] <= '9' || s[i] == '_'); i++ {
-			if s[i] == '_' {
+		for ; i < lenS; i++ {
+			c := s[i]
+			if c == '_' {
 				continue
 			}
-			if e < 10000 {
-				e = e*10 + int(s[i]) - '0'
+			if c-'0' <= 9 {
+				if e < 10000 {
+					e = e*10 + int(c-'0')
+				}
+			} else {
+				break
 			}
 		}
 		b.dp += e * esign
 	}
 
-	if i != len(s) {
-		return
-	}
-
-	ok = true
-	return
+	return i == lenS
 }
 
-// readFloat reads a decimal or hexadecimal mantissa and exponent from a float
-// byte slice representation in s
 func readFloat(s []byte) (mantissa uint64, exp int, neg, trunc, hex bool, i int, ok bool) {
-	underscores := false
-
-	// optional sign
-	if i >= len(s) {
+	lenS := len(s)
+	if lenS == 0 {
 		return
 	}
-	switch s[i] {
-	case '+':
+	_ = s[lenS-1] // BCE Hint
+	underscores := false
+
+	if s[i] == '+' {
 		i++
-	case '-':
+	} else if s[i] == '-' {
 		i++
 		neg = true
 	}
 
-	// digits
-	base := uint64(10)
-	maxMantDigits := 19 // 10^19 fits in uint64
-	expChar := byte('e')
-	if i+2 < len(s) && s[i] == '0' && lower(s[i+1]) == 'x' {
-		base = 16
-		maxMantDigits = 16 // 16^16 fits in uint64
-		i += 2
-		expChar = 'p'
-		hex = true
+	if i >= lenS {
+		return
 	}
+
+	if i+2 < lenS && s[i] == '0' && (s[i+1]|0x20) == 'x' {
+		hex = true
+		i += 2
+	}
+
 	sawdot := false
 	sawdigits := false
 	nd := 0
 	ndMant := 0
 	dp := 0
-loop:
-	for ; i < len(s); i++ {
-		switch c := s[i]; true {
-		case c == '_':
-			underscores = true
-			continue
 
-		case c == '.':
-			if sawdot {
-				break loop
-			}
-			sawdot = true
-			dp = nd
-			continue
-
-		case '0' <= c && c <= '9':
-			sawdigits = true
-			if c == '0' && nd == 0 { // ignore leading zeros
-				dp--
-				continue
-			}
-			nd++
-			if ndMant < maxMantDigits {
-				mantissa *= base
-				mantissa += uint64(c - '0')
-				ndMant++
-			} else if c != '0' {
-				trunc = true
-			}
-			continue
-
-		case base == 16 && 'a' <= lower(c) && lower(c) <= 'f':
-			sawdigits = true
-			nd++
-			if ndMant < maxMantDigits {
-				mantissa *= 16
-				mantissa += uint64(lower(c) - 'a' + 10)
-				ndMant++
+	// Split the hot paths. This allows the compiler to perfectly inline
+	// and unroll the decimal path without branch pollution from hex checks.
+	if !hex {
+		// DECIMAL HOT PATH (Register Arithmetic Only)
+		for ; i < lenS; i++ {
+			c := s[i]
+			if c-'0' <= 9 {
+				sawdigits = true
+				if c == '0' && nd == 0 {
+					dp--
+					continue
+				}
+				nd++
+				if ndMant < 19 {
+					mantissa = mantissa*10 + uint64(c-'0')
+					ndMant++
+				} else if c != '0' {
+					trunc = true
+				}
+			} else if c == '.' {
+				if sawdot {
+					break
+				}
+				sawdot = true
+				dp = nd
+			} else if c == '_' {
+				underscores = true
 			} else {
-				trunc = true
+				break
 			}
-			continue
 		}
-		break
+	} else {
+		// HEX HOT PATH
+		for ; i < lenS; i++ {
+			c := s[i]
+			v := c
+			isDigit := false
+
+			if c-'0' <= 9 {
+				v = c - '0'
+				isDigit = true
+			} else if (c|0x20)-'a' <= 5 {
+				v = (c | 0x20) - 'a' + 10
+				isDigit = true
+			}
+
+			if isDigit {
+				sawdigits = true
+				if v == 0 && nd == 0 {
+					dp--
+					continue
+				}
+				nd++
+				if ndMant < 16 {
+					mantissa = mantissa<<4 | uint64(v)
+					ndMant++
+				} else if v != 0 {
+					trunc = true
+				}
+			} else if c == '.' {
+				if sawdot {
+					break
+				}
+				sawdot = true
+				dp = nd
+			} else if c == '_' {
+				underscores = true
+			} else {
+				break
+			}
+		}
 	}
+
 	if !sawdigits {
 		return
 	}
@@ -251,41 +243,46 @@ loop:
 		dp = nd
 	}
 
-	if base == 16 {
+	if hex {
 		dp *= 4
 		ndMant *= 4
 	}
 
-	// optional exponent moves decimal point.
-	if i < len(s) && lower(s[i]) == expChar {
+	expChar := byte('e')
+	if hex {
+		expChar = 'p'
+	}
+
+	if i < lenS && (s[i]|0x20) == expChar {
 		i++
-		if i >= len(s) {
+		if i >= lenS {
 			return
 		}
 		esign := 1
-		switch s[i] {
-		case '+':
+		if s[i] == '+' {
 			i++
-		case '-':
+		} else if s[i] == '-' {
 			i++
 			esign = -1
 		}
-		if i >= len(s) || s[i] < '0' || s[i] > '9' {
+		if i >= lenS || s[i]-'0' > 9 {
 			return
 		}
 		e := 0
-		for ; i < len(s) && ('0' <= s[i] && s[i] <= '9' || s[i] == '_'); i++ {
-			if s[i] == '_' {
+		for ; i < lenS; i++ {
+			c := s[i]
+			if c-'0' <= 9 {
+				if e < 10000 {
+					e = e*10 + int(c-'0')
+				}
+			} else if c == '_' {
 				underscores = true
-				continue
-			}
-			if e < 10000 {
-				e = e*10 + int(s[i]) - '0'
+			} else {
+				break
 			}
 		}
 		dp += e * esign
-	} else if base == 16 {
-		// Must have exponent.
+	} else if hex {
 		return
 	}
 
@@ -301,7 +298,6 @@ loop:
 	return
 }
 
-// decimal power of ten to binary power of two.
 var powtab = []int{1, 3, 6, 9, 13, 16, 19, 23, 26}
 
 func (d *decimal) floatBits(flt *floatInfo) (b uint64, overflow bool) {
@@ -387,7 +383,6 @@ out:
 	return bits, overflow
 }
 
-// Exact powers of 10.
 var float64pow10 = []float64{
 	1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9,
 	1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19,
@@ -406,7 +401,7 @@ func atof64exact(mantissa uint64, exp int, neg bool) (f float64, ok bool) {
 	switch {
 	case exp == 0:
 		return f, true
-	case exp > 0 && exp <= 15+22: // int * 10^k
+	case exp > 0 && exp <= 15+22:
 		if exp > 22 {
 			f *= float64pow10[exp-22]
 			exp = 22
@@ -415,14 +410,13 @@ func atof64exact(mantissa uint64, exp int, neg bool) (f float64, ok bool) {
 			return
 		}
 		return f * float64pow10[exp], true
-	case exp < 0 && exp >= -22: // int / 10^k
+	case exp < 0 && exp >= -22:
 		return f / float64pow10[-exp], true
 	}
 	return
 }
 
 func atof32exact(mantissa uint64, exp int, neg bool) (f float32, ok bool) {
-	// 23 mantissa bits
 	if mantissa>>23 != 0 {
 		return
 	}
@@ -433,7 +427,7 @@ func atof32exact(mantissa uint64, exp int, neg bool) (f float32, ok bool) {
 	switch {
 	case exp == 0:
 		return f, true
-	case exp > 0 && exp <= 7+10: // int * 10^k
+	case exp > 0 && exp <= 7+10:
 		if exp > 10 {
 			f *= float32pow10[exp-10]
 			exp = 10
@@ -442,7 +436,7 @@ func atof32exact(mantissa uint64, exp int, neg bool) (f float32, ok bool) {
 			return
 		}
 		return f * float32pow10[exp], true
-	case exp < 0 && exp >= -10: // int / 10^k
+	case exp < 0 && exp >= -10:
 		return f / float32pow10[-exp], true
 	}
 	return
@@ -593,8 +587,6 @@ func atof64(s []byte) (f float64, n int, err error) {
 	return f, n, err
 }
 
-// ParseFloat converts the []byte s to a floating-point number
-// with the precision specified by bitSize: 32 for float32, or 64 for float64.
 func ParseFloat(s []byte, bitSize int) (float64, error) {
 	f, n, err := parseFloatPrefix(s, bitSize)
 	if n != len(s) {

@@ -15,12 +15,19 @@ func ParseComplex(s []byte, bitSize int) (complex128, error) {
 		size = 32 // complex64 uses float32 parts
 	}
 
-	// Remove parentheses, if any.
-	if len(s) >= 2 && s[0] == '(' && s[len(s)-1] == ')' {
-		s = s[1 : len(s)-1]
+	lenS := len(s)
+	if lenS == 0 {
+		return 0, ErrSyntax
 	}
 
-	var pending error // pending range error, or nil
+	// Remove parentheses without re-evaluating length continuously.
+	_ = s[lenS-1] // BCE Hint
+	if lenS >= 2 && s[0] == '(' && s[lenS-1] == ')' {
+		s = s[1 : lenS-1]
+		lenS -= 2
+	}
+
+	var pending error
 
 	// Read real part (possibly imaginary part if followed by 'i').
 	re, n, err := parseFloatPrefix(s, size)
@@ -31,25 +38,24 @@ func ParseComplex(s []byte, bitSize int) (complex128, error) {
 		pending = err
 	}
 	s = s[n:]
+	lenS -= n
 
 	// If we have nothing left, we're done.
-	if len(s) == 0 {
+	if lenS == 0 {
 		return complex(re, 0), pending
 	}
 
-	// Otherwise, look at the next character.
+	_ = s[lenS-1] // BCE Hint for remaining slice
 	switch s[0] {
 	case '+':
-		// Consume the '+' to avoid an error if we have "+NaNi", but
-		// do this only if we don't have a "++" (don't hide that error).
-		if len(s) > 1 && s[1] != '+' {
+		if lenS > 1 && s[1] != '+' {
 			s = s[1:]
+			lenS--
 		}
 	case '-':
 		// ok
 	case 'i':
-		// If 'i' is the last character, we only have an imaginary part.
-		if len(s) == 1 {
+		if lenS == 1 {
 			return complex(0, re), pending
 		}
 		fallthrough
@@ -67,7 +73,6 @@ func ParseComplex(s []byte, bitSize int) (complex128, error) {
 	}
 	s = s[n:]
 
-	// Equivalent to checking if s != "i"
 	if len(s) != 1 || s[0] != 'i' {
 		return 0, ErrSyntax
 	}

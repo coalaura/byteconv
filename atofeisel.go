@@ -13,9 +13,9 @@ import (
 func eiselLemire64(man uint64, exp10 int, neg bool) (f float64, ok bool) {
 	if man == 0 {
 		if neg {
-			f = math.Float64frombits(0x8000000000000000) // Negative zero.
+			return math.Float64frombits(0x8000000000000000), true
 		}
-		return f, true
+		return 0.0, true
 	}
 	pow, exp2, ok := pow10(exp10)
 	if !ok {
@@ -68,9 +68,9 @@ func eiselLemire64(man uint64, exp10 int, neg bool) (f float64, ok bool) {
 func eiselLemire32(man uint64, exp10 int, neg bool) (f float32, ok bool) {
 	if man == 0 {
 		if neg {
-			f = math.Float32frombits(0x80000000) // Negative zero.
+			return math.Float32frombits(0x80000000), true
 		}
-		return f, true
+		return 0.0, true
 	}
 	pow, exp2, ok := pow10(exp10)
 	if !ok {

@@ -6,32 +6,34 @@
 package byteconv
 
 type decimal struct {
-	d     [800]byte // digits, big-endian representation
-	nd    int       // number of digits used
-	dp    int       // decimal point
-	neg   bool      // negative flag
-	trunc bool      // discarded nonzero digits beyond d[:nd]
+	d     [800]byte
+	nd    int
+	dp    int
+	neg   bool
+	trunc bool
 }
 
-// trim trailing zeros from number.
 func trim(a *decimal) {
-	for a.nd > 0 && a.d[a.nd-1] == '0' {
-		a.nd--
+	nd := a.nd
+	if nd > 0 {
+		_ = a.d[nd-1] // BCE Hint
+		for nd > 0 && a.d[nd-1] == '0' {
+			nd--
+		}
+		a.nd = nd
 	}
-	if a.nd == 0 {
+	if nd == 0 {
 		a.dp = 0
 	}
 }
 
-// Assign v to a.
 func (a *decimal) Assign(v uint64) {
 	var buf [24]byte
 
 	n := 0
 	for v > 0 {
 		v1 := v / 10
-		v -= 10 * v1
-		buf[n] = byte(v + '0')
+		buf[n] = byte(v - 10*v1 + '0')
 		n++
 		v = v1
 	}
@@ -49,9 +51,13 @@ const uintSize = 32 << (^uint(0) >> 63)
 const maxShift = uintSize - 4
 
 func rightShift(a *decimal, k uint) {
+	if a.nd == 0 {
+		return
+	}
+	_ = a.d[a.nd-1] // BCE Hint
+
 	r := 0
 	w := 0
-
 	var n uint
 	for ; n>>k == 0; r++ {
 		if r >= a.nd {
@@ -167,8 +173,10 @@ var leftcheats = []leftCheat{
 }
 
 func prefixIsLessThan(b []byte, s []byte) bool {
-	for i := 0; i < len(s); i++ {
-		if i >= len(b) {
+	lenS := len(s)
+	lenB := len(b)
+	for i := 0; i < lenS; i++ {
+		if i >= lenB {
 			return true
 		}
 		if b[i] != s[i] {

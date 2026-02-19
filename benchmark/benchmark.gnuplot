@@ -11,7 +11,7 @@ set style data linespoints
 set pointsize 0.8
 
 set output "benchmark.png"
-set title "strconv vs byteconv"
+set title "strconv vs byteconv (go1.26)"
 set xlabel ""
 set ylabel "ns/op"
 set xtics rotate by -90

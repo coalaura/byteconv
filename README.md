@@ -63,6 +63,7 @@ The entire parsing surface (e.g., `Atoi`, `ParseInt`, `ParseFloat`, `ParseBool`)
 Because `byteconv` skips the `string(bytes)` cast, it effectively saves allocations on dynamically retrieved byte slices and avoids overhead. Below is a gnuplot showcasing the performance difference between standard lib casting and natively parsing bytes with `byteconv`.
 
 ![img](benchmark/benchmark.png)
+*Ran on AMD Ryzen 9 9950X3D 16-Core Processor*
 
 ## License
 
