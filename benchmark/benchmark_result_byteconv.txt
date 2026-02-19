@@ -1,0 +1,9 @@
+# go test -bench=Byteconv$ -benchtime=5s
+
+# name, run times, speed, ns/op
+BenchmarkParseBool                  1000000000               0.9306 ns/op
+BenchmarkAtoi_Small                 1000000000               1.814 ns/op
+BenchmarkAtoi_Large                 419679704               14.14 ns/op
+BenchmarkParseFloat_Small           607309086                9.906 ns/op
+BenchmarkParseFloat_Large           247662325               24.09 ns/op
+BenchmarkParseFloat_FromBytes       248876839               23.93 ns/op
