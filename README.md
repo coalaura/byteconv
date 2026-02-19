@@ -10,6 +10,8 @@ Parsing data types from `[]byte` payloads (such as those returned by network rea
 
 `byteconv` solves this problem by providing a 1-to-1 equivalent of the standard `strconv` package that operates natively on `[]byte`. It eliminates string allocations entirely while remaining highly optimized.
 
+> **Note**: `byteconv` only implements `[]byte -> x` parsing functions (like `ParseFloat`, `Atoi`). It does **not** reimplement the `x -> []byte` formatting functions. The standard library's `strconv` already supplies zero-allocation byte-append functions (like `strconv.AppendFloat`, `strconv.AppendInt`). It is highly recommended to continue using those standard library functions for formatting to byte slices.
+
 ## Installation
 
 ```sh
@@ -57,6 +59,8 @@ func main() {
 ## Performance
 
 The entire parsing surface (e.g., `Atoi`, `ParseInt`, `ParseFloat`, `ParseBool`) achieves **0 allocs/op** and executes in just a few nanoseconds, matching or outperforming standard library equivalents without requiring string conversions.
+
+Because `byteconv` skips the `string(bytes)` cast, it effectively saves allocations on dynamically retrieved byte slices and avoids overhead. Below is a gnuplot showcasing the performance difference between standard lib casting and natively parsing bytes with `byteconv`.
 
 ![img](benchmark/benchmark.png)
 

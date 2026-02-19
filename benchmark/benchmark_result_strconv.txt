@@ -1,9 +1,16 @@
 # go test -bench=Strconv$ -benchtime=5s
 
 # name, run times, speed, ns/op
-BenchmarkParseBool                   1000000000               2.632 ns/op
-BenchmarkAtoi_Small                  1000000000               2.509 ns/op
-BenchmarkAtoi_Large                  381887434               15.69 ns/op
-BenchmarkParseFloat_Small            582983583               10.33 ns/op
-BenchmarkParseFloat_Large            222222369               26.95 ns/op
-BenchmarkParseFloat_FromBytes        209298650               28.60 ns/op
+ParseBool                   1000000000               2.513 ns/op
+Atoi_Small                  1000000000               2.505 ns/op
+Atoi_Large                  427549492               14.08 ns/op
+ParseFloat_Small            534323232               11.14 ns/op
+ParseFloat_Large            222217768               26.90 ns/op
+ParseFloat_FromBytes        209615128               28.65 ns/op
+ParseInt_Hex                721811804                8.639 ns/op
+ParseInt_Oct                732255079                8.088 ns/op
+ParseInt_Bin                567095046               10.49 ns/op
+ParseFloat_Sci              382923427               15.77 ns/op
+ParseFloat_NaN              1000000000               5.224 ns/op
+ParseFloat_Inf              1000000000               5.507 ns/op
+ParseComplex                243781587               24.65 ns/op
